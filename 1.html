@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>北京市城市运行可视化大屏</title>
+  <!-- ECharts 主库 -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <!-- 词云扩展 -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      margin: 0;
+      background: #050b1a;
+      color: #ffffff;
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      overflow: hidden;
+    }
+    .dashboard {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      width: 100vw;
+    }
+    /* 顶部标题栏 */
+    .header {
+      height: 9vh;
+      min-height: 54px;
+      padding: 0 1.5vw;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: radial-gradient(circle at top, #1d2f6f 0, #050b1a 60%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .header-title {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: #e6f7ff;
+      text-shadow: 0 0 8px rgba(0, 153, 255, 0.5);
+    }
+    .header-sub {
+      font-size: 0.85rem;
+      opacity: 0.9;
+      text-align: right;
+      line-height: 1.4;
+    }
+    /* 主体：三列网格布局，地图在中间整列 */
+    .main {
+      flex: 1;
+      padding: 0.5vh 1vw 1vh;
+      display: grid;
+      grid-template-columns: 1.3fr 1.8fr 1.3fr;
+      grid-template-rows: repeat(3, 1fr);
+      grid-template-areas:
+        "left-top map right-top"
+        "left-mid map right-mid"
+        "left-bottom map right-bottom";
+      gap: 0.6rem;
+      height: 91vh;
+    }
+    .panel {
+      background: radial-gradient(circle at top left, #14213d 0, #050b1a 70%);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 0.4rem 0.5rem;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      height: 1.6rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.2rem;
+    }
+    .panel-title {
+      font-size: 0.9rem;
+      border-left: 3px solid #4fc3f7;
+      padding-left: 0.35rem;
+      color: #e3f2ff;
+    }
+    .panel-tools {
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+    .panel-content {
+      flex: 1;
+      min-height: 0;
+    }
+    .chart {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 各区域定位 */
+    #panel-left-top    { grid-area: left-top; }
+    #panel-left-mid    { grid-area: left-mid; }
+    #panel-left-bottom { grid-area: left-bottom; }
+    #panel-map         { grid-area: map; }
+    #panel-right-top   { grid-area: right-top; }
+    #panel-right-mid   { grid-area: right-mid; }
+    #panel-right-bottom{ grid-area: right-bottom; }
+
+    /* 中间 panel 里面再细分：上部指标卡 + 下部地图 */
+    .center-content {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    .center-metrics {
+      height: 30%;
+      min-height: 70px;
+      max-height: 110px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.4rem;
+      margin-bottom: 0.3rem;
+    }
+    .metric-card {
+      background: linear-gradient(135deg, rgba(33,150,243,0.25), rgba(3,169,244,0.08));
+      border-radius: 6px;
+      padding: 0.25rem 0.4rem;
+      border: 1px solid rgba(144,202,249,0.3);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .metric-label {
+      font-size: 0.7rem;
+      color: #b3e5fc;
+      margin-bottom: 0.12rem;
+    }
+    .metric-value {
+      font-size: 1.0rem;
+      font-weight: 600;
+      color: #e1f5fe;
+    }
+    .metric-sub {
+      font-size: 0.65rem;
+      color: #90caf9;
+      margin-top: 0.08rem;
+    }
+    .center-map-wrapper {
+      flex: 1;
+      min-height: 0;
+    }
+    #chart-map {
+      width: 100%;
+      height: 100%;
+    }
+
+    @media (max-width: 1200px) {
+      .header-title { font-size: 1.4rem; }
+      .metric-value { font-size: 0.9rem; }
+      .metric-label { font-size: 0.65rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="dashboard">
+  <!-- 顶部 -->
+  <div class="header">
+    <div class="header-title">北京市城市运行可视化大屏</div>
+    <div class="header-sub" id="clock">
+      北京市 · 综合运行监测<br/>
+      <span>数据演示 - 无对接真实业务</span>
+    </div>
+  </div>
+
+  <!-- 主体：左右图表 + 中间地图 -->
+  <div class="main">
+    <!-- 左 1：24 小时地铁客流（折线） -->
+    <div class="panel" id="panel-left-top">
+      <div class="panel-header">
+        <div class="panel-title" id="traffic-title">近 24 小时地铁客流趋势（全市）</div>
+      </div>
+      <div class="panel-content">
+        <div id="chart-traffic" class="chart"></div>
+      </div>
+    </div>
+
+    <!-- 左 2：晚高峰道路拥堵热力图（heatmap） -->
+    <div class="panel" id="panel-left-mid">
+      <div class="panel-header">
+        <div class="panel-title">晚高峰道路拥堵热力图</div>
+        <div class="panel-tools">Heatmap · 环路 × 时间段</div>
+      </div>
+      <div class="panel-content">
+        <div id="chart-congestion" class="chart"></div>
+      </div>
+    </div>
+
+    <!-- 左 3：居民出行方式流向（桑基图 sankey） -->
+    <div class="panel" id="panel-left-bottom">
+      <div class="panel-header">
+        <div class="panel-title">居民出行方式流向</div>
+        <div class="panel-tools">Sankey · 出行目的</div>
+      </div>
+      <div class="panel-content">
+        <div id="chart-taxi" class="chart"></div>
+      </div>
+    </div>
+
+    <!-- 中：北京市地图 + 上方指标卡片 + 地图叠加热点点位 -->
+    <div class="panel" id="panel-map">
+      <div class="panel-header">
+        <div class="panel-title" id="map-title">北京市各区综合指数</div>
+      </div>
+      <div class="panel-content">
+        <div class="center-content">
+          <!-- 上：全市核心指标卡片 -->
+          <div class="center-metrics">
+            <div class="metric-card">
+              <div class="metric-label">常住人口（万）</div>
+              <div class="metric-value" id="kpi-pop">2189.3</div>
+              <div class="metric-sub">来源：模拟统计</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">今日地铁总客流（万）</div>
+              <div class="metric-value" id="kpi-metro">1023.5</div>
+              <div class="metric-sub">较昨日 +3.2%</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">当前平均拥堵指数</div>
+              <div class="metric-value" id="kpi-congestion">1.68</div>
+              <div class="metric-sub">指数越低越畅通 · 2.0 以上明显拥堵</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">全社会实时负荷（MW）</div>
+              <div class="metric-value" id="kpi-power">3260</div>
+              <div class="metric-sub">更新频率：5 秒</div>
+            </div>
+          </div>
+          <!-- 下：地图 -->
+          <div class="center-map-wrapper">
+            <div id="chart-map" class="chart"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右 1：舆情关键词词云（wordCloud） -->
+    <div class="panel" id="panel-right-top">
+      <div class="panel-header">
+        <div class="panel-title" id="pm-title">城市舆情关键词词云</div>
+        <div class="panel-tools">WordCloud · 热点话题</div>
+      </div>
+      <div class="panel-content">
+        <div id="chart-pm" class="chart"></div>
+      </div>
+    </div>
+
+    <!-- 右 2：能源结构饼图 -->
+    <div class="panel" id="panel-right-mid">
+      <div class="panel-header">
+        <div class="panel-title">城市能源消费结构</div>
+      </div>
+      <div class="panel-content">
+        <div id="chart-energy" class="chart"></div>
+      </div>
+    </div>
+
+    <!-- 右 3：实时电力负荷（动态折线） -->
+    <div class="panel" id="panel-right-bottom">
+      <div class="panel-header">
+        <div class="panel-title">实时电力负荷监控</div>
+      </div>
+      <div class="panel-content">
+        <div id="chart-power" class="chart"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ========= 1. 实时时钟 ========= */
+  function updateClock() {
+    var now = new Date();
+    var s =
+      "北京市 · 综合运行监测<br/>" +
+      now.getFullYear() + "-" +
+      String(now.getMonth() + 1).padStart(2, "0") + "-" +
+      String(now.getDate()).padStart(2, "0") + " " +
+      String(now.getHours()).padStart(2, "0") + ":" +
+      String(now.getMinutes()).padStart(2, "0") + ":" +
+      String(now.getSeconds()).padStart(2, "0");
+    document.getElementById("clock").innerHTML = s;
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // 调色板
+  var colors = ['#3ba272', '#5470c6', '#fac858', '#ee6666', '#91cc75', '#73c0de'];
+
+  /* ========= 2. 初始化图表实例 ========= */
+  var chartMap       = echarts.init(document.getElementById('chart-map'));
+  var chartTraffic   = echarts.init(document.getElementById('chart-traffic'));
+  var chartCongestion= echarts.init(document.getElementById('chart-congestion'));
+  var chartTaxi      = echarts.init(document.getElementById('chart-taxi'));
+  var chartPM        = echarts.init(document.getElementById('chart-pm'));
+  var chartEnergy    = echarts.init(document.getElementById('chart-energy'));
+  var chartPower     = echarts.init(document.getElementById('chart-power'));
+
+  /* ========= 3. 北京市地图 + 热点点位 ========= */
+  (function initMap() {
+    chartMap.showLoading('default', { text: '北京市地图加载中…' });
+
+    fetch('https://geo.datav.aliyun.com/areas_v3/bound/110000_full.json')
+      .then(function (res) { return res.json(); })
+      .then(function (geoJson) {
+        echarts.registerMap('beijing', geoJson);
+
+        var districts = [
+          '东城区','西城区','朝阳区','丰台区','石景山区',
+          '海淀区','门头沟区','房山区','通州区','顺义区',
+          '昌平区','大兴区','怀柔区','平谷区','密云区','延庆区'
+        ];
+
+        var mapData = districts.map(function (name) {
+          return {
+            name: name,
+            value: Math.round(60 + Math.random() * 40)  // 综合指数 60~100
+          };
+        });
+
+        var option = {
+          visualMap: {
+            min: 60,
+            max: 100,
+            text: ['高', '低'],
+            textStyle: { color: '#e0f2ff' },
+            right: '4%',
+            bottom: '4%',
+            calculable: true,
+            inRange: {
+              color: ['#1565c0', '#42a5f5', '#90caf9']
+            }
+          },
+          tooltip: {
+            trigger: 'item',
+            formatter: function (params) {
+              if (isNaN(params.value)) {
+                return params.name + '<br/>综合指数：无数据';
+              }
+              return params.name + '<br/>综合指数：' + params.value;
+            }
+          },
+          geo: {
+            map: 'beijing',
+            roam: true,
+            label: {
+              show: false,
+              color: '#ffffff'
+            },
+            itemStyle: {
+              borderColor: '#607d8b',
+              borderWidth: 0.6,
+              areaColor: '#0b1c3c'
+            },
+            emphasis: {
+              label: { show: true, color: '#fff' },
+              itemStyle: { areaColor: '#283593' }
+            }
+          },
+          series: [
+            {
+              name: '综合指数',
+              type: 'map',
+              geoIndex: 0,
+              data: mapData
+            }
+          ]
+        };
+
+        chartMap.hideLoading();
+        chartMap.setOption(option);
+
+        // ====== 使用图形元素添加说明性标注（折线 + 文本） ======
+        function getDistrictCenter(geoJson, name) {
+          var features = (geoJson && geoJson.features) ? geoJson.features : [];
+          for (var i = 0; i < features.length; i++) {
+            var prop = features[i].properties || {};
+            if (prop.name === name) {
+              // Aliyun GeoJSON 通常在 cp 或 centroid 字段里存放中心点坐标
+              if (prop.centroid && prop.centroid.length === 2) {
+                return prop.centroid;
+              }
+              if (prop.cp && prop.cp.length === 2) {
+                return prop.cp;
+              }
+            }
+          }
+          return null;
+        }
+
+        function updateCallouts() {
+          // 配置需要标注的区及样式
+          var configs = [
+            {
+              name: '海淀区',
+              id: 'haidian-callout-group',
+              text: '海淀区：科教资源聚集，交通压力较大',
+              offset1: [40, -30],   // 从区中心到折线中间点的偏移
+              offset2: [120, -40],  // 从区中心到折线终点的偏移
+              textOffset: [4, -10]  // 从折线终点到文字左上角的偏移
+            },
+            {
+              name: '怀柔区',
+              id: 'huairou-callout-group',
+              text: '怀柔区：生态涵养发展区',
+              offset1: [30, -40],
+              offset2: [120, -60],
+              textOffset: [4, -10]
+            },
+            {
+              name: '昌平区',
+              id: 'changping-callout-group',
+              text: '昌平区：居住人口增长，轨道交通承压',
+              offset1: [-40, -30],
+              offset2: [-140, -40],
+              textOffset: [-150, -10]
+            }
+          ];
+
+          var graphics = [];
+
+          configs.forEach(function (cfg) {
+            var centerCoord = getDistrictCenter(geoJson, cfg.name);
+            if (!centerCoord) {
+              return;
+            }
+
+            // 将经纬度转换为当前视图下的像素坐标
+            var startPixel = chartMap.convertToPixel({ geoIndex: 0 }, centerCoord);
+            if (!startPixel || startPixel.length !== 2) {
+              return;
+            }
+
+            var midPixel = [
+              startPixel[0] + cfg.offset1[0],
+              startPixel[1] + cfg.offset1[1]
+            ];
+            var endPixel = [
+              startPixel[0] + cfg.offset2[0],
+              startPixel[1] + cfg.offset2[1]
+            ];
+
+            graphics.push({
+              id: cfg.id,
+              type: 'group',
+              children: [
+                {
+                  type: 'polyline',
+                  shape: {
+                    points: [startPixel, midPixel, endPixel]
+                  },
+                  style: {
+                    stroke: '#ffffff',
+                    lineWidth: 1,
+                    shadowColor: 'rgba(0, 0, 0, 0.4)',
+                    shadowBlur: 4
+                  }
+                },
+                {
+                  type: 'text',
+                  style: {
+                    text: cfg.text,
+                    fill: '#ffffff',
+                    fontSize: 12
+                  },
+                  position: [endPixel[0] + cfg.textOffset[0], endPixel[1] + cfg.textOffset[1]]
+                }
+              ]
+            });
+          });
+
+          // 一次性更新所有标注图形
+          chartMap.setOption({
+            graphic: graphics
+          });
+        }
+
+        // 初次渲染后创建三个区的标注
+        updateCallouts();
+        // 地图缩放 / 平移 或窗口尺寸变化时，重新计算标注位置
+        chartMap.on('geoRoam', updateCallouts);
+        window.addEventListener('resize', updateCallouts);
+
+        // 地图点击：改左/右标题，模拟“按区查看”
+        chartMap.on('click', function (params) {
+          var name = params.name || '全市';
+          document.getElementById('traffic-title').innerText =
+            '近 24 小时地铁客流趋势（' + name + '视角）';
+          document.getElementById('pm-title').innerText =
+            '城市舆情关键词词云（' + name + '相关）';
+        });
+
+        // 悬停地图：更新地图标题
+        chartMap.on('mouseover', function (params) {
+          document.getElementById('map-title').innerText =
+            '北京市各区综合指数（当前：' + params.name + '）';
+        });
+        chartMap.on('mouseout', function () {
+          document.getElementById('map-title').innerText = '北京市各区综合指数';
+        });
+      })
+      .catch(function (err) {
+        chartMap.hideLoading();
+        console.error('北京 GeoJSON 加载失败：', err);
+      });
+  })();
+
+  /* ========= 4. 近 24 小时地铁客流（折线） ========= */
+  (function initTraffic() {
+    var hours = [];
+    var values = [];
+    for (var i = 0; i < 24; i++) {
+      hours.push(i + ':00');
+      var base = (i >= 7 && i <= 21) ? 300 : 80;
+      var v = base + Math.round((Math.random() - 0.5) * 80);
+      values.push(Math.max(30, v));
+    }
+
+    var option = {
+      color: ['#4fc3f7'],
+      tooltip: { trigger: 'axis' },
+      grid: { left: '8%', right: '6%', top: '16%', bottom: '18%' },
+      xAxis: {
+        type: 'category',
+        data: hours,
+        boundaryGap: false,
+        axisLabel: { color: '#cfd8ff', fontSize: 10 },
+        axisLine: { lineStyle: { color: '#78909c' } }
+      },
+      yAxis: {
+        type: 'value',
+        name: '客流量（人次）',
+        axisLabel: { color: '#cfd8ff', fontSize: 10 },
+        axisLine: { lineStyle: { color: '#78909c' } },
+        splitLine: { lineStyle: { color: 'rgba(120,140,180,0.3)' } }
+      },
+      dataZoom: [
+        { type: 'inside', start: 0, end: 60 },
+        { type: 'slider', height: 12, bottom: '4%', start: 0, end: 60 }
+      ],
+      series: [
+        {
+          name: '地铁客流',
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 4,
+          areaStyle: { opacity: 0.22 },
+          data: values
+        }
+      ]
+    };
+    chartTraffic.setOption(option);
+  })();
+
+  /* ========= 5. 晚高峰道路拥堵热力图（heatmap） ========= */
+  (function initCongestionHeatmap() {
+    // 横轴：时间段，纵轴：道路 / 环路
+    var timeSlots = ['17:00','17:30','18:00','18:30','19:00','19:30','20:00'];
+    var roads = ['二环', '三环', '四环', '五环', '机场高速'];
+
+    // 构造热力数据 [xIndex, yIndex, value]
+    var data = [];
+    for (var x = 0; x < timeSlots.length; x++) {
+      for (var y = 0; y < roads.length; y++) {
+        // 基于环路位置 + 高峰时间略微调整，模拟拥堵指数 0.8~2.8
+        var base = 1.0 + y * 0.2;
+        if (x >= 2 && x <= 4) base += 0.5;  // 18:00~19:00 更堵
+        var value = parseFloat((base + (Math.random() - 0.5) * 0.4).toFixed(2));
+        data.push([x, y, Math.max(0.5, Math.min(2.8, value))]);
+      }
+    }
+
+    var option = {
+      tooltip: {
+        position: 'top',
+        formatter: function (params) {
+          var t = timeSlots[params.value[0]];
+          var r = roads[params.value[1]];
+          var v = params.value[2];
+          return r + ' / ' + t + '<br/>拥堵指数：' + v;
+        }
+      },
+      grid: { left: '12%', right: '8%', top: '18%', bottom: '18%' },
+      xAxis: {
+        type: 'category',
+        data: timeSlots,
+        splitArea: { show: true },
+        axisLabel: { color: '#cfd8ff', fontSize: 10 },
+        axisLine: { lineStyle: { color: '#78909c' } }
+      },
+      yAxis: {
+        type: 'category',
+        data: roads,
+        splitArea: { show: true },
+        axisLabel: { color: '#cfd8ff', fontSize: 10 },
+        axisLine: { lineStyle: { color: '#78909c' } }
+      },
+      visualMap: {
+        min: 0.5,
+        max: 2.8,
+        orient: 'vertical',
+        right: '1%',
+        top: 'center',
+        itemWidth: 14,          // 颜色条宽度
+        itemHeight: 120,
+        text: ['更拥堵', '更畅通'],
+        textStyle: { color: '#e0f2ff', fontSize: 9 },
+        calculable: true,
+        inRange: {
+          color: ['#1b5e20', '#ffeb3b', '#d32f2f'] // 绿->黄->红
+        }
+      },
+      series: [
+        {
+          name: '拥堵指数',
+          type: 'heatmap',
+          data: data,
+          label: { show: false },
+          emphasis: {
+            itemStyle: {
+              borderColor: '#fff',
+              borderWidth: 1
+            }
+          }
+        }
+      ]
+    };
+    chartCongestion.setOption(option);
+  })();
+
+  /* ========= 6. 居民出行方式流向（Sankey） ========= */
+  (function initSankey() {
+    var option = {
+      tooltip: { trigger: 'item' },
+      series: [
+        {
+          type: 'sankey',
+          layout: 'none',
+          emphasis: { focus: 'adjacency' },
+          nodeWidth: 12,
+          nodeGap: 8,
+          data: [
+            { name: '居住区' },
+            { name: '地铁' },
+            { name: '公交' },
+            { name: '网约车' },
+            { name: '自行车' },
+            { name: '工作区' },
+            { name: '学校' },
+            { name: '商圈' }
+          ],
+          links: [
+            { source: '居住区', target: '地铁',   value: 3200 },
+            { source: '居住区', target: '公交',   value: 2100 },
+            { source: '居住区', target: '网约车', value: 800  },
+            { source: '居住区', target: '自行车', value: 500  },
+
+            { source: '地铁',   target: '工作区', value: 2000 },
+            { source: '地铁',   target: '商圈',   value: 700  },
+            { source: '地铁',   target: '学校',   value: 500  },
+
+            { source: '公交',   target: '工作区', value: 1200 },
+            { source: '公交',   target: '学校',   value: 500  },
+            { source: '公交',   target: '商圈',   value: 300  },
+
+            { source: '网约车', target: '工作区', value: 500  },
+            { source: '网约车', target: '商圈',   value: 250  },
+            { source: '网约车', target: '学校',   value: 50   },
+
+            { source: '自行车', target: '工作区', value: 200  },
+            { source: '自行车', target: '学校',   value: 180  }
+          ]
+        }
+      ]
+    };
+    chartTaxi.setOption(option);
+  })();
+
+  /* ========= 7. 城市舆情关键词词云（WordCloud） ========= */
+  (function initWordCloud() {
+    var data = [
+      { name: '交通出行', value: 120 },
+      { name: '教育资源', value: 95  },
+      { name: '医疗服务', value: 90  },
+      { name: '环境治理', value: 80  },
+      { name: '房价',     value: 110 },
+      { name: '就业机会', value: 85  },
+      { name: '科技创新', value: 70  },
+      { name: '文化活动', value: 65  },
+      { name: '养老服务', value: 50  },
+      { name: '城市更新', value: 60  },
+      { name: '地铁拥挤', value: 88  },
+      { name: '空气质量', value: 78  },
+      { name: '基础设施', value: 66  },
+      { name: '夜间经济', value: 55  },
+      { name: '公共安全', value: 92  }
+    ];
+
+    var option = {
+      tooltip: { show: true },
+      series: [
+        {
+          type: 'wordCloud',
+          shape: 'circle',
+          gridSize: 8,
+          sizeRange: [10, 38],
+          rotationRange: [-45, 45],
+          textStyle: {
+            color: function () {
+              return (
+                'rgb(' +
+                Math.round(Math.random() * 160) + ',' +
+                Math.round(Math.random() * 160) + ',' +
+                Math.round(Math.random() * 160) + ')'
+              );
+            }
+          },
+          data: data
+        }
+      ]
+    };
+    chartPM.setOption(option);
+  })();
+
+  /* ========= 8. 能源结构饼图 ========= */
+  (function initEnergy() {
+    var data = [
+      { value: 45, name: '电力' },
+      { value: 25, name: '天然气' },
+      { value: 15, name: '集中供热' },
+      { value: 10, name: '新能源' },
+      { value: 5,  name: '其他' }
+    ];
+
+    var option = {
+      color: colors,
+      tooltip: {
+        trigger: 'item',
+        formatter: '{b}<br/>占比：{d}%<br/>消耗指数：{c}'
+      },
+      legend: {
+        orient: 'vertical',
+        left: '4%',
+        top: 'middle',
+        textStyle: { color: '#e3f2ff', fontSize: 10 }
+      },
+      series: [
+        {
+          type: 'pie',
+          radius: ['35%', '68%'],
+          center: ['62%', '55%'],
+          label: { color: '#e0f7fa', fontSize: 10 },
+          labelLine: { length: 8, length2: 6 },
+          data: data
+        }
+      ]
+    };
+    chartEnergy.setOption(option);
+  })();
+
+  /* ========= 9. 实时电力负荷监控（水平进度条条形图） ========= */
+  (function initPower() {
+    // 初始负荷值（MW）
+    var currentLoad = 3260;
+    var minLoad = 2500;
+    var maxLoad = 3800;
+
+    var option = {
+      color: ['#66bb6a'],
+      tooltip: {
+        trigger: 'item',
+        formatter: function (params) {
+          return '当前电力负荷：' + params.value + ' MW';
+        }
+      },
+      grid: { left: '12%', right: '8%', top: '25%', bottom: '25%' },
+      xAxis: {
+        type: 'value',
+        min: minLoad - 100,
+        max: maxLoad + 100,
+        axisLabel: {
+          color: '#cfd8ff',
+          fontSize: 10,
+          formatter: '{value} MW'
+        },
+        axisLine: { lineStyle: { color: '#78909c' } },
+        splitLine: { lineStyle: { color: 'rgba(120,140,180,0.3)' } }
+      },
+      yAxis: {
+        type: 'category',
+        data: ['当前负荷'],
+        axisLabel: { color: '#cfd8ff', fontSize: 11 },
+        axisLine: { lineStyle: { color: '#78909c' } }
+      },
+      series: [
+        {
+          name: '电力负荷',
+          type: 'bar',
+          barWidth: '50%',
+          data: [currentLoad],
+          itemStyle: {
+            borderRadius: [6, 6, 6, 6]
+          },
+          label: {
+            show: true,
+            position: 'right',
+            formatter: '{c} MW',
+            color: '#e3f2ff',
+            fontSize: 11
+          }
+        }
+      ]
+    };
+
+    chartPower.setOption(option);
+
+    // 每 5 秒随机波动一次负荷值，同时更新中间 KPI
+    setInterval(function () {
+      var delta = Math.round((Math.random() - 0.5) * 200);
+      currentLoad = currentLoad + delta;
+      currentLoad = Math.max(minLoad, Math.min(maxLoad, currentLoad));
+
+      chartPower.setOption({
+        series: [
+          {
+            data: [currentLoad]
+          }
+        ]
+      });
+
+      // 同步更新中间 KPI：实时负荷卡片
+      var kpiPower = document.getElementById('kpi-power');
+      if (kpiPower) {
+        kpiPower.textContent = currentLoad;
+      }
+    }, 5000);
+  })();
+
+  /* ========= 10. 中间 KPI 小幅动态波动 ========= */
+  (function initKpiPulse() {
+    var popBase   = 2189.3;
+    var metroBase = 1023.5;
+    var congBase  = 1.68;
+
+    setInterval(function () {
+      // 人口基本不变，做极小波动模拟统计刷新
+      var pop = popBase + (Math.random() - 0.5) * 0.5;
+      document.getElementById('kpi-pop').textContent = pop.toFixed(1);
+
+      // 当日地铁客流略有变化
+      var metro = metroBase + (Math.random() - 0.5) * 20;
+      document.getElementById('kpi-metro').textContent = metro.toFixed(1);
+
+      // 平均拥堵指数小幅波动在 1.3~2.1 之间
+      var cong = congBase + (Math.random() - 0.5) * 0.2;
+      cong = Math.max(1.3, Math.min(2.1, cong));
+      document.getElementById('kpi-congestion').textContent = cong.toFixed(2);
+    }, 4000);
+  })();
+
+  /* ========= 11. 窗口自适应 ========= */
+  window.addEventListener('resize', function () {
+    chartMap.resize();
+    chartTraffic.resize();
+    chartCongestion.resize();
+    chartTaxi.resize();
+    chartPM.resize();
+    chartEnergy.resize();
+    chartPower.resize();
+  });
+</script>
+</body>
+</html>
